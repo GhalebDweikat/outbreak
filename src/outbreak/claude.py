@@ -10,7 +10,10 @@ from .models import ModelError, ModelFatal, Reply
 
 # Named here so ANTHROPIC_BASE_URL can't send the API key somewhere else.
 API = "https://api.anthropic.com"
-MAX_TOKENS = 8000
+# 8,000 cut off 3 of 500 Sonnet 4.6 kill-test episodes mid-thought, so they went unscored.
+MAX_TOKENS = 16000
+# Long enough for a reply that uses all of MAX_TOKENS.
+TIMEOUT = 300.0
 SPEND_LIMIT_CODE = "enforced_spend_limit_reached"
 
 # Models from before adaptive thinking take a thinking budget in place of an effort level.
@@ -38,7 +41,7 @@ class ClaudeModel:
         if name in MANUAL_THINKING and effort not in BUDGETS:
             raise ValueError(f"{name} takes effort {', '.join(BUDGETS)}, not {effort}")
         self._sdk = anthropic
-        self._client = client or anthropic.Anthropic(base_url=API, max_retries=6, timeout=120.0)
+        self._client = client or anthropic.Anthropic(base_url=API, max_retries=6, timeout=TIMEOUT)
         self.name = name
         self.price_model = name
         self.effort = effort

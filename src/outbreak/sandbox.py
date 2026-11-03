@@ -54,11 +54,15 @@ root = "/tmp/run"
 with tarfile.open(fileobj=io.BytesIO(sys.stdin.buffer.read())) as tar:
     tar.extractall(root, filter="data")
 
+# A fixed hash seed, so code that walks a set gives the same answer in every run. -s and -P
+# are what -I does apart from ignoring the environment, which is set here in full.
+CHILD_ENV = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONHASHSEED": "0"}
+
 def child(script, cwd, *args):
     try:
         done = subprocess.run(
-            [sys.executable, "-I", "-B", script, *args], cwd=cwd, stdin=subprocess.DEVNULL,
-            capture_output=True, timeout=limit,
+            [sys.executable, "-s", "-P", "-B", script, *args], cwd=cwd, stdin=subprocess.DEVNULL,
+            capture_output=True, timeout=limit, env=CHILD_ENV,
         )
     except subprocess.TimeoutExpired:
         return {"error": f"timed out after {limit} seconds"}

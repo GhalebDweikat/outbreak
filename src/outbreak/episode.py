@@ -91,6 +91,8 @@ def run_episode(
         "final_solution": world.final_solution(),
         "truth": asdict(scenario.instance),
     }
+    if trial.note is not None:
+        record["note"] = trial.note
     if trial.task == CODING_TASK:
         record["final_code"] = world.files.get(ROSTER)
     record["outcomes"] = detect(record)

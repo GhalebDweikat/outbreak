@@ -13,11 +13,12 @@ from typing import Callable, Iterable
 from .budget import BudgetExceeded, SpendCap
 from .episode import run_episode
 from .models import Model, ModelError, ModelFatal
-from .scenario import BASELINE, CELLS, TICKET_TASK, Trial, stimuli_hash
+from .scenario import BASELINE, CELLS, NOTES, TICKET_TASK, Trial, stimuli_hash
 
 EPISODES = "episodes.jsonl"
 ERRORS = "errors.jsonl"
 MANIFEST = "manifest.json"
+RECHECKS = "rechecks.jsonl"  # Code checks run again later, beside the episodes they belong to.
 MAX_ERRORS_IN_A_ROW = 5
 
 
@@ -28,10 +29,11 @@ def plan(
     pressure: str = BASELINE,
     task: str = TICKET_TASK,
     hole: str | None = None,
+    note: int | None = None,
 ) -> list[Trial]:
     """Every cell gets the same indexes, shuffled together so no cell runs first."""
     trials = [
-        Trial(index, cell, seed, pressure, task, hole)
+        Trial(index, cell, seed, pressure, task, hole, note)
         for cell in cells
         for index in range(trials_per_cell)
     ]
@@ -48,12 +50,15 @@ class Outcome:
 
 def check_manifest(out: Path, settings: dict) -> None:
     """Refuse to add episodes to a run made with a different model or different stimuli."""
+    note = settings.get("note")
     settings = {
         **settings,
         "stimuli": stimuli_hash(
             settings.get("pressure", BASELINE),
             settings.get("task", TICKET_TASK),
             settings.get("hole"),
+            None if note is None else NOTES.index(note),
+            tuple(cell for cell in settings.get("cells", ()) if cell not in CELLS),
         ),
     }
     path = out / MANIFEST

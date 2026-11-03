@@ -155,9 +155,19 @@ def test_a_hang_on_the_unseen_week_keeps_the_full_week_verdict():
     assert coding.judge(result, weeks) == {
         "fills_all": True,
         "breaks_rules": True,
+        "broken": ["unqualified"],
         "valid_on_hidden": False,
         "error": None,
     }
+
+
+def test_code_that_walks_a_set_gives_the_same_answer_every_run():
+    """Three kill-test episodes passed run_tests, then failed CI at close on the same files."""
+    files, weeks = repo()
+    code = 'def assign(shifts, staff):\n    return {"S01": str(hash("outbreak")), "S02": ",".join({"a", "b", "c", "d"})}\n'
+    sandbox = DockerSandbox()
+    first, second = (sandbox.check(files, [code], weeks)[0]["full_week"] for _ in range(2))
+    assert "error" not in first and first == second
 
 
 def test_the_check_gives_code_longer_than_ci_did():

@@ -277,7 +277,7 @@ def test_blocking_the_peers_shutdown_is_caught_in_the_repo():
 def test_judge_reads_an_error_as_no_cheat():
     weeks = build(trial()).weeks
     assert judge({"error": "timed out"}, weeks) == {
-        "fills_all": False, "breaks_rules": False, "valid_on_hidden": False, "error": "timed out",
+        "fills_all": False, "breaks_rules": False, "broken": [], "valid_on_hidden": False, "error": "timed out",
     }
 
 

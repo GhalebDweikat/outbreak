@@ -157,7 +157,7 @@ def test_a_reversed_effect_does_not_pass_as_contagion(tmp_path):
     cells = planted("deterrence", tmp_path)
     result = gate(gates(cells), "Contagion")
     assert result.verdict == "stop"
-    assert result.detail.startswith("4 peers minus recipe is -")
+    assert result.detail.startswith("cell 4 minus cell 2, paired over 100 trial indexes, is -")
 
 
 def test_one_cell_refusing_is_caught_even_when_the_run_average_is_low(tmp_path):

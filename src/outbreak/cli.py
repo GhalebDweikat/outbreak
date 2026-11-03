@@ -11,9 +11,11 @@ from .budget import PRICES, SpendCap
 from .report import render
 from .runner import plan, run
 from .scenario import (
+    ALL_CELLS,
     BASELINE,
     CELLS,
     CODING_TASK,
+    NOTES,
     PRESSURES,
     TASK_HOLES,
     TICKET_TASK,
@@ -34,15 +36,19 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="outbreak", description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
 
-    kill = commands.add_parser("killtest", help="run the five-cell kill test")
+    kill = commands.add_parser("killtest", help="run the five-cell kill test, or the echo test")
     kill.add_argument("--out", type=Path, required=True, help="folder for this run")
     kill.add_argument("--model", default="scripted", choices=sorted(PRICES))
     kill.add_argument("--trials", type=int, default=100, help="trials per cell")
-    kill.add_argument("--cells", type=int, nargs="+", default=list(CELLS), choices=list(CELLS))
+    kill.add_argument(
+        "--cells", type=int, nargs="+", default=list(CELLS), choices=list(ALL_CELLS),
+        help="cells to run; 2 4 6 is the echo test",
+    )
     kill.add_argument("--seed", type=int, default=0)
     kill.add_argument("--pressure", default=BASELINE, choices=list(PRESSURES))
     kill.add_argument("--task", default=TICKET_TASK, choices=TASKS)
     kill.add_argument("--hole", choices=ALL_HOLES, help="point every recipe at this hole")
+    kill.add_argument("--note", choices=NOTES, help="show every trial this wording of the note")
     kill.add_argument("--image", default=IMAGE, help="Docker image for the coding task")
     kill.add_argument(
         "--docker", action="store_true", help="run scripted coding episodes in Docker too"
@@ -62,14 +68,24 @@ def parser() -> argparse.ArgumentParser:
         "out", type=Path, nargs="+", help="run folders, merged if they differ only in cells"
     )
 
+    again = commands.add_parser("recheck", help="rerun a coding run's code checks in Docker")
+    again.add_argument("out", type=Path, help="run folder")
+    again.add_argument("--all", action="store_true", help="every check, not only those that errored")
+    again.add_argument("--image", default=IMAGE)
+
     show = commands.add_parser("show", help="print what an agent sees in one trial")
-    show.add_argument("--cell", type=int, default=4, choices=list(CELLS))
+    show.add_argument("--cell", type=int, default=4, choices=list(ALL_CELLS))
     show.add_argument("--index", type=int, default=0)
     show.add_argument("--seed", type=int, default=0)
     show.add_argument("--pressure", default=BASELINE, choices=list(PRESSURES))
     show.add_argument("--task", default=TICKET_TASK, choices=TASKS)
     show.add_argument("--hole", choices=ALL_HOLES)
+    show.add_argument("--note", choices=NOTES)
     return root
+
+
+def note_index(args: argparse.Namespace) -> int | None:
+    return NOTES.index(args.note) if args.note else None
 
 
 def check_hole(args: argparse.Namespace, root: argparse.ArgumentParser) -> None:
@@ -93,7 +109,10 @@ def make_sandbox(args: argparse.Namespace, settings: dict):
 
 def killtest(args: argparse.Namespace, root: argparse.ArgumentParser) -> int:
     check_hole(args, root)
-    trials = plan(args.trials, args.seed, args.cells, args.pressure, args.task, args.hole)
+    try:
+        trials = plan(args.trials, args.seed, args.cells, args.pressure, args.task, args.hole, note_index(args))
+    except ValueError as error:
+        root.error(str(error))
     settings = {
         "model": args.model,
         "seed": args.seed,
@@ -105,6 +124,8 @@ def killtest(args: argparse.Namespace, root: argparse.ArgumentParser) -> int:
         settings["task"] = args.task
     if args.hole:
         settings["hole"] = args.hole
+    if args.note:
+        settings["note"] = args.note
     policies = CODING_POLICIES if args.task == CODING_TASK else POLICIES
     if args.policy and args.policy not in policies:
         root.error(f"--policy {args.policy} is not a {args.task} script")
@@ -143,9 +164,14 @@ def killtest(args: argparse.Namespace, root: argparse.ArgumentParser) -> int:
 
 def show(args: argparse.Namespace, root: argparse.ArgumentParser) -> int:
     check_hole(args, root)
-    trial = Trial(args.index, args.cell, args.seed, args.pressure, args.task, args.hole)
+    try:
+        trial = Trial(args.index, args.cell, args.seed, args.pressure, args.task, args.hole, note_index(args))
+    except ValueError as error:
+        root.error(str(error))
     scenario = build(trial)
-    print(f"Stimuli {stimuli_hash(args.pressure, args.task, args.hole)}, hole {trial.hole}\n")
+    extra = (args.cell,) if args.cell not in CELLS else ()
+    fingerprint = stimuli_hash(args.pressure, args.task, args.hole, note_index(args), extra)
+    print(f"Stimuli {fingerprint}, hole {trial.hole}\n")
     print(f"--- system ---\n{scenario.system}\n\n--- opening ---\n{scenario.opening}\n\n--- files ---")
     for path, text in sorted(scenario.files.items()):
         print(f"{path}: {len(text)} characters")
@@ -167,6 +193,17 @@ def main(argv: list[str] | None = None) -> int:
             print(render(*args.out))
         except ValueError as error:
             root.error(str(error))
+        return 0
+    if args.command == "recheck":
+        from .recheck import recheck
+        from .sandbox import DockerSandbox
+
+        fresh = recheck(args.out, DockerSandbox(args.image), args.all)
+        # Only what decides a label. A field the old check never recorded isn't a change.
+        changed = [e for e in fresh if any(e["old"][key] != e["new"][key] for key in ("fills_all", "breaks_rules", "error"))]
+        for entry in changed:
+            print(f"{entry['id']} write {entry['write_seq']}: {entry['old']} -> {entry['new']}")
+        print(f"Reran {len(fresh)} checks, and {len(changed)} came back different. The report now uses the reruns.")
         return 0
     return show(args, root)
 
