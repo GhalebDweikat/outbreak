@@ -264,6 +264,33 @@ def test_a_run_refuses_to_mix_settings(tmp_path):
         run(plan(1), make, tmp_path, {"model": "claude-haiku-5-5"})
 
 
+def planted_cells(out, cells, trials=100, **extra):
+    plant = PLANTS["contagion"]
+    settings = {"model": "scripted", "script": "contagion", "cells": cells, **extra}
+    run(plan(trials, 0, cells), lambda trial: ScriptedModel(plant, trial), out, settings)
+
+
+def test_runs_that_split_the_cells_report_as_one(tmp_path):
+    planted_cells(tmp_path / "a", [2, 4])
+    planted_cells(tmp_path / "b", [1, 3, 5])
+    assert "**Verdict: PROVISIONAL.**" in render(tmp_path / "a")
+    assert "**Verdict: GO.** 500 episodes." in render(tmp_path / "a", tmp_path / "b")
+
+
+def test_runs_that_differ_in_more_than_their_cells_are_not_merged(tmp_path):
+    planted_cells(tmp_path / "a", [2, 4], trials=2)
+    planted_cells(tmp_path / "b", [1, 3, 5], trials=2, seed=1)
+    with pytest.raises(ValueError, match="more than its cells"):
+        render(tmp_path / "a", tmp_path / "b")
+
+
+def test_runs_that_share_a_cell_are_not_merged(tmp_path):
+    planted_cells(tmp_path / "a", [2, 4], trials=2)
+    planted_cells(tmp_path / "b", [1, 4], trials=2)
+    with pytest.raises(ValueError, match="share a cell"):
+        render(tmp_path / "a", tmp_path / "b")
+
+
 def test_the_cap_stops_a_run_and_keeps_what_finished(tmp_path):
     make = lambda trial: ScriptedModel(POLICIES["honest"], trial, "claude-sonnet-5-5")
     outcome = run(plan(50), make, tmp_path, {"model": "x"}, SpendCap(limit=0.02), workers=1)

@@ -5,25 +5,38 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from .budget import SpendCap
+from .coding import ROSTER, CodingWorld
 from .detect import detect
 from .models import Model
-from .scenario import MAX_CALLS, SYSTEM, Trial, build
-from .world import SOLUTION, TOOLS, World
+from .scenario import CODING_TASK, Scenario, Trial, build
+from .world import World
+
+
+def make_world(scenario: Scenario, sandbox=None) -> World:
+    if scenario.trial.task == CODING_TASK:
+        return CodingWorld(
+            scenario.files, scenario.late_board, scenario.pushback, sandbox, scenario.weeks
+        )
+    return World(scenario.files, scenario.late_board, scenario.pushback)
 
 
 def run_episode(
-    trial: Trial, model: Model, cap: SpendCap | None = None, feasible: bool = False
+    trial: Trial,
+    model: Model,
+    cap: SpendCap | None = None,
+    feasible: bool = False,
+    sandbox=None,
 ) -> dict:
     cap = cap or SpendCap()
     scenario = build(trial, feasible=feasible)
-    world = World(scenario.files)
+    world = make_world(scenario, sandbox)
     messages: list[dict] = [{"role": "user", "content": scenario.opening}]
     replies: list[dict] = []
     end = "call_limit"
 
-    for _ in range(MAX_CALLS):
+    for _ in range(scenario.max_calls):
         cap.check()
-        reply = model.reply(SYSTEM, TOOLS, messages)
+        reply = model.reply(scenario.system, scenario.tools, messages)
         usd = cap.charge(model.price_model, reply.usage)
         replies.append(
             {
@@ -59,12 +72,15 @@ def run_episode(
             break
         messages.append({"role": "user", "content": results})
 
+    world.finish()
     record = {
         "id": trial.id,
         "index": trial.index,
         "cell": trial.cell,
         "hole": trial.hole,
         "seed": trial.seed,
+        "pressure": trial.pressure,
+        "task": trial.task,
         "model": model.name,
         "end": end,
         "calls": len(replies),
@@ -72,8 +88,10 @@ def run_episode(
         "opening": scenario.opening,
         "replies": replies,
         "events": world.events,
-        "final_solution": world.files.get(SOLUTION),
+        "final_solution": world.final_solution(),
         "truth": asdict(scenario.instance),
     }
+    if trial.task == CODING_TASK:
+        record["final_code"] = world.files.get(ROSTER)
     record["outcomes"] = detect(record)
     return record

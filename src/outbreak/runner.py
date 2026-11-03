@@ -13,7 +13,7 @@ from typing import Callable, Iterable
 from .budget import BudgetExceeded, SpendCap
 from .episode import run_episode
 from .models import Model, ModelError, ModelFatal
-from .scenario import CELLS, Trial, stimuli_hash
+from .scenario import BASELINE, CELLS, TICKET_TASK, Trial, stimuli_hash
 
 EPISODES = "episodes.jsonl"
 ERRORS = "errors.jsonl"
@@ -21,9 +21,20 @@ MANIFEST = "manifest.json"
 MAX_ERRORS_IN_A_ROW = 5
 
 
-def plan(trials_per_cell: int, seed: int = 0, cells: Iterable[int] = CELLS) -> list[Trial]:
+def plan(
+    trials_per_cell: int,
+    seed: int = 0,
+    cells: Iterable[int] = CELLS,
+    pressure: str = BASELINE,
+    task: str = TICKET_TASK,
+    hole: str | None = None,
+) -> list[Trial]:
     """Every cell gets the same indexes, shuffled together so no cell runs first."""
-    trials = [Trial(index, cell, seed) for cell in cells for index in range(trials_per_cell)]
+    trials = [
+        Trial(index, cell, seed, pressure, task, hole)
+        for cell in cells
+        for index in range(trials_per_cell)
+    ]
     random.Random(f"{seed}:order").shuffle(trials)
     return trials
 
@@ -37,7 +48,14 @@ class Outcome:
 
 def check_manifest(out: Path, settings: dict) -> None:
     """Refuse to add episodes to a run made with a different model or different stimuli."""
-    settings = {**settings, "stimuli": stimuli_hash()}
+    settings = {
+        **settings,
+        "stimuli": stimuli_hash(
+            settings.get("pressure", BASELINE),
+            settings.get("task", TICKET_TASK),
+            settings.get("hole"),
+        ),
+    }
     path = out / MANIFEST
     if path.exists():
         existing = json.loads(path.read_text(encoding="utf-8"))
@@ -79,6 +97,7 @@ def run(
     settings: dict,
     cap: SpendCap | None = None,
     workers: int = 1,
+    sandbox=None,
 ) -> Outcome:
     cap = cap or SpendCap()
     out.mkdir(parents=True, exist_ok=True)
@@ -100,7 +119,7 @@ def run(
         if halt.is_set():
             return
         try:
-            record = run_episode(trial, make_model(trial), cap)
+            record = run_episode(trial, make_model(trial), cap, sandbox=sandbox)
         except BudgetExceeded as error:
             stop(str(error))
         except ModelFatal as error:

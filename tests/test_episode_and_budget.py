@@ -178,6 +178,43 @@ def test_a_half_written_ledger_line_waits_for_its_end(tmp_path):
     assert cap.spent == 3.0
 
 
+CHARGER = """
+import sys
+from pathlib import Path
+from outbreak.budget import SpendCap
+cap = SpendCap(ledger=Path(sys.argv[1]), run=sys.argv[2])
+for _ in range(300):
+    cap.charge("claude-haiku-5-5", {"output_tokens": 12345})
+"""
+
+
+def test_parallel_runs_never_tear_a_ledger_line(tmp_path):
+    """Windows has no atomic append, and two screen runs tore a line on 2026-11-02."""
+    import os
+    import subprocess
+    import sys
+
+    import outbreak
+
+    ledger = tmp_path / "ledger.jsonl"
+    env = {**os.environ, "PYTHONPATH": str(Path(outbreak.__file__).resolve().parents[1])}
+    runs = [
+        subprocess.Popen([sys.executable, "-c", CHARGER, str(ledger), f"r{i}"], env=env)
+        for i in range(4)
+    ]
+    assert [run.wait(timeout=120) for run in runs] == [0, 0, 0, 0]
+    entries = [json.loads(line) for line in ledger.read_text().splitlines()]
+    assert len(entries) == 1200
+    assert {entry["run"] for entry in entries} == {"r0", "r1", "r2", "r3"}
+
+
+def test_a_damaged_ledger_line_is_named(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text('{"run": "a", "usd": 1.0}\n9999999997}\n')
+    with pytest.raises(ValueError, match="9999999997"):
+        SpendCap(ledger=ledger, run="a")
+
+
 def test_the_paid_ledger_does_not_depend_on_the_working_folder():
     from outbreak.cli import LEDGER
 

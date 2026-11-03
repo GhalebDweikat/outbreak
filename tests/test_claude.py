@@ -102,6 +102,76 @@ def test_nothing_is_sent_that_haiku_rejects_or_that_would_swap_the_model():
         assert field not in bodies[0]
 
 
+def first_request(name, effort="medium"):
+    """The body and headers of the first request a model sends."""
+    seen = []
+
+    def handle(request):
+        seen.append((json.loads(request.content), request.headers))
+        return httpx.Response(200, json=message([SUBMIT]))
+
+    sdk = anthropic.Anthropic(
+        api_key="not-a-real-key",
+        http_client=anthropic.DefaultHttpxClient(transport=httpx.MockTransport(handle)),
+        max_retries=0,
+    )
+    run_episode(Trial(0, 4), ClaudeModel(name, effort, client=sdk))
+    return seen[0]
+
+
+def test_haiku_4_5_gets_a_thinking_budget_and_nothing_it_rejects():
+    body, headers = first_request("claude-haiku-4-5", "low")
+    assert body["model"] == "claude-haiku-4-5-20251001"
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    assert "output_config" not in body
+    assert "interleaved" not in headers.get("anthropic-beta", "")
+
+
+def test_opus_4_5_takes_both_a_budget_and_an_effort_level():
+    body, headers = first_request("claude-opus-4-5", "high")
+    assert body["model"] == "claude-opus-4-5-20251101"
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 6000}
+    assert body["output_config"] == {"effort": "high"}
+    assert "interleaved-thinking-2025-05-14" in headers["anthropic-beta"]
+
+
+@pytest.mark.parametrize("name", ["claude-sonnet-4-6", "claude-opus-4-6"])
+def test_the_4_6_models_think_adaptively_without_the_newer_display_field(name):
+    body, headers = first_request(name)
+    assert body["model"] == name
+    assert body["thinking"] == {"type": "adaptive"}
+    assert body["output_config"] == {"effort": "medium"}
+    assert "anthropic-beta" not in headers
+
+
+def test_every_thinking_budget_leaves_room_to_answer():
+    from outbreak.claude import BUDGETS, MAX_TOKENS
+
+    assert all(1024 <= budget < MAX_TOKENS for budget in BUDGETS.values())
+
+
+def test_an_effort_level_an_old_model_cannot_map_is_refused():
+    with pytest.raises(ValueError):
+        ClaudeModel("claude-haiku-4-5", "max", client=object())
+
+
+def test_the_settings_record_the_budget_only_where_one_is_sent():
+    assert ClaudeModel("claude-haiku-4-5", client=object()).settings()["thinking_budget"] == 4000
+    assert "thinking_budget" not in ClaudeModel("claude-haiku-5-5", client=object()).settings()
+
+
+def test_the_settings_record_the_dated_id_that_was_sent():
+    assert ClaudeModel("claude-opus-4-5", client=object()).settings()["api_id"] == "claude-opus-4-5-20251101"
+    assert "api_id" not in ClaudeModel("claude-sonnet-4-6", client=object()).settings()
+
+
+def test_every_model_the_adapter_knows_has_a_price():
+    from outbreak.budget import PRICES
+    from outbreak.claude import API_IDS, MANUAL_THINKING, SUMMARIZED_BY_DEFAULT
+
+    assert MANUAL_THINKING | SUMMARIZED_BY_DEFAULT | set(API_IDS) <= set(PRICES)
+
+
 def test_thinking_blocks_go_back_unchanged():
     _, bodies = play([(200, message([THINKING, LIST])), (200, message([SUBMIT]))])
     assistant = bodies[1]["messages"][1]
