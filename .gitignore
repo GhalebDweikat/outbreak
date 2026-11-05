@@ -1,3 +1,6 @@
+# Run output stays local until a run is published
+runs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
